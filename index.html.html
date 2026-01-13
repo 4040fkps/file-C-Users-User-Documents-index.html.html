@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Canvas Shooter Ultimate</title>
+<style>
+body{margin:0;overflow:hidden;background:#000;color:white;font-family:sans-serif}
+canvas{display:block}
+#menu{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.85);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:14px
+}
+button,select{padding:10px 20px;font-size:16px}
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>Canvas Shooter Ultimate</h1>
+  <label>武器：
+    <select id="weaponSel">
+      <option value="pistol">手槍</option>
+      <option value="rifle">步槍</option>
+      <option value="sniper">狙擊</option>
+      <option value="flamethrower">噴火槍</option>
+      <option value="gatling">加特林</option>
+      <option value="rpg">RPG</option>
+      <option value="katana">卡塔納</option>
+      <option value="ultimateWeapon">天神之刃</option>
+    </select>
+  </label>
+  <label>難度：
+    <select id="difficultySel">
+      <option value="easy">簡單</option>
+      <option value="normal">普通</option>
+      <option value="hard">困難</option>
+    </select>
+  </label>
+  <button onclick="startGame()">開始遊戲</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+/* ===== Canvas ===== */
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+resize();onresize=resize;
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+
+/* ===== 狀態 ===== */
+let gameStarted=false,gameOver=false;
+let mouseDown=false;
+let mouseX=0,mouseY=0;
+canvas.onmousemove=e=>{mouseX=e.clientX;mouseY=e.clientY}
+
+/* ===== 玩家 ===== */
+let player={x:0,y:0,r:12,speed:4,baseSpeed:4,hp:100,maxHp:100};
+
+/* ===== 武器設定 ===== */
+const weaponPresets={
+  pistol:{dmg:3,cooldown:300,auto:false,speed:8,mag:12,reload:120},
+  rifle:{dmg:2,cooldown:120,auto:true,speed:9,mag:30,reload:150},
+  sniper:{dmg:8,cooldown:700,auto:false,speed:12,mag:5,reload:180},
+  flamethrower:{dmg:1.5,cooldown:150,auto:true,speed:6,mag:20,reload:180},
+  gatling:{dmg:0.8,cooldown:60,auto:true,speed:10,mag:50,reload:200},
+  rpg:{dmg:25,cooldown:1000,auto:false,speed:12,mag:1,reload:300},
+  katana:{dmg:30,chargeDmg:80,cooldown:600,maxCharge:40,comboMax:3,auto:false,speed:0,mag:999,reload:0},
+  ultimateWeapon:{dmg:9999,cooldown:5000,auto:false,speed:0,mag:1,reload:0}
+};
+let weapon={};
+
+/* ===== 難度 ===== */
+let difficulty={enemyHp:1,enemySpeed:1,spawnRate:1000};
+
+/* ===== 關卡章節 ===== */
+const stages=[
+  {name:"第一章", maxEnemies:10, boss:false},
+  {name:"第二章", maxEnemies:15, boss:true},
+  {name:"第三章", maxEnemies:20, boss:true}
+];
+let currentStage=0;
+let totalSpawned=0;
+
+/* ===== 輸入 ===== */
+const keys={};
+onkeydown=e=>{
+  keys[e.key]=true;
+  if(e.key==="r" && gameOver) respawn();
+  if(e.key==="e" && gameOver) goToMenu();
+  if(e.key==="r" && !weapon.reloading) startReload();
+};
+onkeyup=e=>keys[e.key]=false;
+onmousedown=()=>mouseDown=true;
+onmouseup=()=>mouseDown=false;
+
+/* ===== 子彈 / 特效 ===== */
+const bullets=[];
+let lastShot=0;
+const gunFlame=[];
+const fireParticles=[];
+const swordWaves=[];
+
+/* ===== 道具 ===== */
+const items=[];
+function spawnItem(){items.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,type:Math.random()<0.5?"heal":"speed"});}
+
+/* ===== 牆壁 ===== */
+const walls=[
+  {x:100,y:100,w:200,h:20},{x:400,y:150,w:20,h:200},{x:700,y:50,w:150,h:20},
+  {x:300,y:400,w:20,h:200},{x:500,y:300,w:250,h:20},{x:600,y:500,w:20,h:150},
+  {x:150,y:500,w:200,h:20},{x:50,y:300,w:20,h:150},{x:800,y:400,w:150,h:20}
+];
+
+/* ===== 敵人 ===== */
+const enemies=[];
+function spawnEnemy(boss=false){
+  const hp=(boss?120:20)*difficulty.enemyHp;
+  enemies.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,hp,maxHp:hp,speed:(boss?1.5:1.2)*difficulty.enemySpeed,boss,dashCD:180,shootCD:150});
+}
+
+/* ===== 開始遊戲 ===== */
+function startGame(){
+  if(gameStarted) return;
+  document.getElementById("menu").style.display="none";
+  gameStarted=true; gameOver=false; currentStage=0; totalSpawned=0;
+  resetPlayer();
+  const w=document.getElementById("weaponSel").value;
+  const wPreset=weaponPresets[w];
+  weapon=Object.assign({},wPreset,{ammo:wPreset.mag,reloading:false,reloadTime:0});
+  const diff=document.getElementById("difficultySel").value;
+  difficulty=diff==="easy"?{enemyHp:0.7,enemySpeed:0.8,spawnRate:1400}:
+             diff==="hard"?{enemyHp:1.5,enemySpeed:1.3,spawnRate:700}:
+             {enemyHp:1,enemySpeed:1,spawnRate:1000};
+  setInterval(trySpawnEnemy,200);
+  setInterval(spawnItem,8000);
+}
+
+/* ===== 玩家重生 / 返回主選單 ===== */
+function respawn(){gameOver=false; resetPlayer();}
+function resetPlayer(){player={x:canvas.width/2,y:canvas.height/2,r:12,speed:4,baseSpeed:4,hp:100,maxHp:100};}
+function goToMenu(){gameOver=false;gameStarted=false;document.getElementById("menu").style.display="flex";enemies.length=0;items.length=0;bullets.length=0;fireParticles.length=0;swordWaves.length=0;}
+
+/* ===== 嘗試刷怪 ===== */
+function trySpawnEnemy(){
+  if(gameOver) return;
+  const stage = stages[currentStage];
+  if(totalSpawned >= stage.maxEnemies) return;
+  if(enemies.length >= stage.maxEnemies) return;
+  const isBoss = stage.boss && Math.random()<0.2;
+  spawnEnemy(isBoss);
+  totalSpawned++;
+}
+
+/* ===== 關卡檢查 ===== */
+function checkStageClear(){
+  const stage = stages[currentStage];
+  if(totalSpawned >= stage.maxEnemies && enemies.length===0){
+    currentStage++;
+    totalSpawned=0;
+    if(currentStage>=stages.length){gameOver=true; alert("你已完成所有章節！");}
+    else {alert(`恭喜過關！進入${stages[currentStage].name}`);}
+  }
+}
+
+/* ===== 揮砍 / 射擊 ===== */
+let katanaCharge = 0;
+let katanaCombo = 0;
+let katanaLastAttack = 0;
+
+function shoot(){
+  const now = Date.now();
+
+  // 卡塔納
+  if(weaponSel.value==="katana"){
+    if(mouseDown){
+      if(katanaCharge<weapon.maxCharge) katanaCharge++;
+      return;
+    }
+    if(now - katanaLastAttack < weapon.cooldown) return;
+    katanaLastAttack = now;
+    katanaCombo = (katanaCombo % weapon.comboMax) + 1;
+    const dmg = katanaCharge>=weapon.maxCharge ? weapon.chargeDmg : weapon.dmg;
+    katanaCharge=0;
+
+    const angle = Math.atan2(mouseY-player.y, mouseX-player.x);
+    const cone = Math.PI/3;
+    const range = 200;
+    enemies.forEach(e=>{
+      const dx = e.x-player.x;
+      const dy = e.y-player.y;
+      const dist = Math.hypot(dx,dy);
+      const enemyAngle = Math.atan2(dy,dx);
+      const diff = Math.abs((enemyAngle - angle + Math.PI*2) % (Math.PI*2));
+      if(dist<range && diff<cone/2){
+        if(e.boss) e.hp -= dmg*0.5; else e.hp -= dmg;
+      }
+    });
+    swordWaves.push({x:player.x,y:player.y,r:0,life:20,angle:angle,cone:cone,range:range});
+    return;
+  }
+
+  // 天神之刃
+  if(weaponSel.value==="ultimateWeapon"){
+    if(now - lastShot < weapon.cooldown) return;
+    lastShot=now;
+    enemies.forEach(e=>e.hp=0);
+    fireParticles.push({x:canvas.width/2,y:canvas.height/2,life:60,size:800,vx:0,vy:0});
+    return;
+  }
+
+  // 其他武器
+  if(weapon.reloading || weapon.ammo<=0) return;
+  if(now-lastShot<weapon.cooldown) return;
+  lastShot=now; weapon.ammo--;
+  const a=Math.atan2(mouseY-player.y,mouseX-player.x);
+  player.x-=Math.cos(a)*2; player.y-=Math.sin(a)*2;
+
+  if(weaponSel.value==="rpg"){
+    bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*weapon.speed,vy:Math.sin(a)*weapon.speed,life:120,radius:50,explosive:true});
+  } else {
+    bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*weapon.speed,vy:Math.sin(a)*weapon.speed,life:80,flame:weaponSel.value==="flamethrower"});
+  }
+  gunFlame.push({x:player.x+Math.cos(a)*12,y:player.y+Math.sin(a)*12,life:4});
+}
+
+/* ===== 換彈 ===== */
+function startReload(){if(weapon.ammo===weapon.mag) return; weapon.reloading=true; weapon.reloadTime=weapon.reload;}
+function updateReload(){if(!weapon.reloading) return; weapon.reloadTime--; if(weapon.reloadTime<=0){weapon.reloading=false; weapon.ammo=weapon.mag;}}
+
+/* ===== 畫武器 ===== */
+function drawGun(){
+  const a=Math.atan2(mouseY-player.y,mouseX-player.x);
+  ctx.save(); ctx.translate(player.x,player.y); ctx.rotate(a);
+  if(weaponSel.value==="katana"){ctx.fillStyle="#9cf";ctx.fillRect(10,-2,30,4);}
+  else{ctx.fillStyle="#aaa";ctx.fillRect(10,-3,18,6);}
+  ctx.restore();
+}
+
+/* ===== 主迴圈 ===== */
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!gameStarted){requestAnimationFrame(loop);return;}
+  if(gameOver){ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="red";ctx.font="48px sans-serif";ctx.textAlign="center";ctx.fillText("YOU DIED",canvas.width/2,canvas.height/2);ctx.fillText("按 R 重生 / E 返回主選單",canvas.width/2,canvas.height/2+60);requestAnimationFrame(loop);return;}
+
+  // 玩家移動
+  let mx=0,my=0;if(keys.w)my--;if(keys.s)my++;if(keys.a)mx--;if(keys.d)mx++;player.x+=mx*player.speed;player.y+=my*player.speed;
+  player.x=Math.max(20,Math.min(canvas.width-20,player.x));player.y=Math.max(20,Math.min(canvas.height-20,player.y));
+  walls.forEach(w=>{if(player.x+player.r>w.x&&player.x-player.r<w.x+w.w&&player.y+player.r>w.y&&player.y-player.r<w.y+w.h){if(mx>0)player.x=w.x-player.r;if(mx<0)player.x=w.x+w.w+player.r;if(my>0)player.y=w.y-player.r;if(my<0)player.y=w.y+w.h+player.r;}});
+
+  if(weapon.auto && mouseDown) shoot(); updateReload();
+
+  // 子彈
+  bullets.forEach((b,i)=>{
+    b.x+=b.vx; b.y+=b.vy; b.life--;
+    ctx.fillStyle=b.explosive?"orange":"yellow"; ctx.fillRect(b.x-2,b.y-2,4,4);
+    if(b.explosive){enemies.forEach(e=>{const dist=Math.hypot(b.x-e.x,b.y-e.y);if(dist<b.radius)e.hp-=weapon.dmg*(1-dist/b.radius);});}
+    if(b.flame){fireParticles.push({x:b.x,y:b.y,life:20+Math.random()*10,size:6+Math.random()*4,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-0.5)*0.5});}
+    if(b.life<=0) bullets.splice(i,1);
+  });
+
+  // 噴火槍AOE
+  if(weaponSel.value==="flamethrower" && mouseDown && weapon.ammo>0){
+    enemies.forEach(e=>{const dist=Math.hypot(player.x-e.x,player.y-e.y);if(dist<60)e.hp-=0.2;});
+    const angle=Math.atan2(mouseY-player.y,mouseX-player.x);
+    fireParticles.push({x:player.x+Math.cos(angle)*12+Math.random()*6-3,y:player.y+Math.sin(angle)*12+Math.random()*6-3,life:20+Math.random()*10,size:6+Math.random()*4,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-0.5)*0.5});
+  }
+
+  // 敵人
+  enemies.forEach((e,ei)=>{
+    const dx=player.x-e.x,dy=player.y-e.y,d=Math.hypot(dx,dy)||1;
+    e.x+=dx/d*e.speed; e.y+=dy/d*e.speed;
+    if(d<20) player.hp-=(e.boss?3:1); if(player.hp<=0) gameOver=true;
+    if(e.hp<=0) enemies.splice(ei,1);
+    ctx.fillStyle=e.boss?"purple":"red"; ctx.beginPath(); ctx.arc(e.x,e.y,16,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#400";ctx.fillRect(e.x-16,e.y-26,32,4); ctx.fillStyle="#f33";ctx.fillRect(e.x-16,e.y-26,32*(e.hp/e.maxHp),4);
+  });
+
+  // 道具
+  items.forEach((it,ii)=>{
+    ctx.fillStyle=it.type==="heal"?"green":"cyan"; ctx.beginPath();ctx.arc(it.x,it.y,8,0,Math.PI*2); ctx.fill();
+    if(Math.hypot(it.x-player.x,it.y-player.y)<16){
+      if(it.type==="heal") player.hp=Math.min(player.maxHp,player.hp+30);
+      if(it.type==="speed"){player.speed=6; setTimeout(()=>player.speed=player.baseSpeed,5000);}
+      items.splice(ii,1);
+    }
+  });
+
+  // 特效
+  gunFlame.forEach((f,i)=>{ctx.fillStyle="orange";ctx.fillRect(f.x-2,f.y-2,6,6);f.life--;if(f.life<=0)gunFlame.splice(i,1);});
+  fireParticles.forEach((p,i)=>{ctx.fillStyle=`rgba(255,${100+Math.random()*155},0,${p.life/30})`;ctx.beginPath();ctx.arc(p.x,p.y,p.size*(p.life/30),0,Math.PI*2);ctx.fill();p.x+=p.vx;p.y+=p.vy;p.life--;if(p.life<=0)fireParticles.splice(i,1);});
+  swordWaves.forEach((w,i)=>{ctx.fillStyle=`rgba(0,200,255,${w.life/20})`;ctx.beginPath();ctx.moveTo(w.x,w.y);ctx.arc(w.x,w.y,w.range,w.angle-w.cone/2,w.angle+w.cone/2);ctx.closePath();ctx.fill(); w.r+=40; w.life--; if(w.life<=0)swordWaves.splice(i,1);});
+
+  // 畫牆
+  ctx.fillStyle="#555"; walls.forEach(w=>ctx.fillRect(w.x,w.y,w.w,w.h));
+
+  // 玩家
+  ctx.fillStyle="white"; ctx.beginPath(); ctx.arc(player.x,player.y,12,0,Math.PI*2); ctx.fill();
+  drawGun();
+
+  // UI
+  ctx.fillStyle="white"; ctx.fillText(weapon.reloading?"換彈中...":`彈藥 ${weapon.ammo}/${weapon.mag}`,20,20);
+  ctx.fillText(`血量 ${Math.floor(player.hp)}/${player.maxHp}`,20,40);
+  ctx.fillText(`關卡: ${stages[currentStage].name}`,20,60);
+
+  checkStageClear();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
