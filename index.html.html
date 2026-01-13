@@ -1,6 +1,49 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
+  <meta charset="UTF-8">
+  <title>Canvas Game</title>
+  <style>
+    body { margin:0; background:#000; color:white; }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+
+<h1 style="text-align:center">Canvas Game 啟動成功</h1>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.onresize = resize;
+
+let x = 100;
+
+function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = "white";
+  ctx.beginPath();
+  ctx.arc(x, canvas.height/2, 20, 0, Math.PI*2);
+  ctx.fill();
+  x += 2;
+  if(x > canvas.width) x = 0;
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
 <meta charset="UTF-8">
 <title>Canvas Shooter Ultimate</title>
 <style>
@@ -314,3 +357,4 @@ loop();
 </script>
 </body>
 </html>
+
