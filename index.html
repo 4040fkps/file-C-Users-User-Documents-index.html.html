@@ -19,15 +19,12 @@ button,select{padding:10px 20px;font-size:16px}
 <body>
 
 <div id="menu">
-  <h1>Canvas Shooter Ultimate</h1>
+  <h1>Canvas Shooter</h1>
   <label>武器：
     <select id="weaponSel">
       <option value="pistol">手槍</option>
-      <option value="rifle">步槍</option>
+      <option value="rifle">步槍（長按）</option>
       <option value="sniper">狙擊</option>
-      <option value="flamethrower">噴火槍</option>
-      <option value="gatling">加特林</option>
-      <option value="rpg">RPG</option>
     </select>
   </label>
   <label>難度：
@@ -54,18 +51,24 @@ let gameStarted=false,gameOver=false;
 let mouseDown=false;
 
 /* ===== 玩家 ===== */
-let player={x:0,y:0,r:12,speed:4,baseSpeed:4,hp:100,maxHp:100};
+const player={
+  x:0,y:0,r:12,
+  speed:4,baseSpeed:4,
+  hp:100,maxHp:100
+};
 
-/* ===== 武器 ===== */
+/* ===== 武器（含彈匣）===== */
 const weaponPresets={
   pistol:{dmg:1,cooldown:300,auto:false,speed:8,mag:12,reload:120},
   rifle:{dmg:0.6,cooldown:120,auto:true,speed:9,mag:30,reload:150},
-  sniper:{dmg:3,cooldown:700,auto:false,speed:12,mag:5,reload:180},
-  flamethrower:{dmg:0.8,cooldown:150,auto:true,speed:6,mag:20,reload:180},
-  gatling:{dmg:0.3,cooldown:60,auto:true,speed:10,mag:50,reload:200},
-  rpg:{dmg:15,cooldown:1000,auto:false,speed:12,mag:1,reload:300}
+  sniper:{dmg:3,cooldown:700,auto:false,speed:12,mag:5,reload:180}
 };
-let weapon={};
+
+const weapon={
+  dmg:1,cooldown:300,auto:false,bulletSpeed:8,
+  magSize:0,ammo:0,
+  reloadTime:0,reloading:false
+};
 
 /* ===== 難度 ===== */
 let difficulty={enemyHp:1,enemySpeed:1,spawnRate:1000};
@@ -74,150 +77,157 @@ let difficulty={enemyHp:1,enemySpeed:1,spawnRate:1000};
 const keys={};
 onkeydown=e=>{
   keys[e.key]=true;
-  if(e.key==="r" && gameOver) respawn();
-  if(e.key==="e" && gameOver) goToMenu();
   if(e.key==="r" && !weapon.reloading) startReload();
 };
 onkeyup=e=>keys[e.key]=false;
 onmousedown=()=>mouseDown=true;
 onmouseup=()=>mouseDown=false;
+
 let mouseX=0,mouseY=0;
 canvas.onmousemove=e=>{mouseX=e.clientX;mouseY=e.clientY};
 
 /* ===== 子彈 ===== */
 const bullets=[];
 let lastShot=0;
-const gunFlame=[];
-const fireParticles=[];
 
-/* ===== 道具 ===== */
-const items=[];
-function spawnItem(){items.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,type:Math.random()<0.5?"heal":"speed"});}
-
-/* ===== 牆壁 ===== */
-const walls=[
-  {x:100,y:100,w:200,h:20},{x:400,y:150,w:20,h:200},{x:700,y:50,w:150,h:20},
-  {x:300,y:400,w:20,h:200},{x:500,y:300,w:250,h:20},{x:600,y:500,w:20,h:150},
-  {x:150,y:500,w:200,h:20},{x:50,y:300,w:20,h:150},{x:800,y:400,w:150,h:20}
-];
-
-/* ===== 敵人 ===== */
-const enemies=[];
-function spawnEnemy(boss=false){
-  const hp=(boss?120:20)*difficulty.enemyHp;
-  enemies.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,hp,maxHp:hp,speed:(boss?1.5:1.2)*difficulty.enemySpeed,boss,dashCD:180,shootCD:150});
-}
-
-/* ===== 開始遊戲 ===== */
-function startGame(){
-  if(gameStarted) return;
-  document.getElementById("menu").style.display="none";
-  gameStarted=true; gameOver=false;
-  resetPlayer();
-  const w=weaponPresets[weaponSel.value];
-  weapon={dmg:w.dmg,cooldown:w.cooldown,auto:w.auto,bulletSpeed:w.speed,magSize:w.mag,ammo:w.mag,reloadMax:w.reload,reloading:false,reloadTime:0};
-  difficulty=difficultySel.value==="easy"?{enemyHp:0.7,enemySpeed:0.8,spawnRate:1400}:
-             difficultySel.value==="hard"?{enemyHp:1.5,enemySpeed:1.3,spawnRate:700}:
-             {enemyHp:1,enemySpeed:1,spawnRate:1000};
-  setInterval(()=>spawnEnemy(Math.random()<0.25),difficulty.spawnRate);
-  setInterval(spawnItem,8000);
-}
-
-/* ===== 玩家重生 ===== */
-function respawn(){gameOver=false; resetPlayer();}
-function resetPlayer(){player={x:canvas.width/2,y:canvas.height/2,r:12,speed:4,baseSpeed:4,hp:100,maxHp:100};}
-
-/* ===== 返回主選單 ===== */
-function goToMenu(){gameOver=false;gameStarted=false;document.getElementById("menu").style.display="flex";enemies.length=0;items.length=0;bullets.length=0;fireParticles.length=0;}
-
-/* ===== 射擊 ===== */
 function shoot(){
-  if(weapon.reloading||weapon.ammo<=0) return;
+  if(weapon.reloading || weapon.ammo<=0) return;
+
   const now=Date.now();
-  if(now-lastShot<weapon.cooldown) return;
-  lastShot=now; weapon.ammo--;
+  if(now-lastShot<weapon.cooldown)return;
+  lastShot=now;
+  weapon.ammo--;
 
   const a=Math.atan2(mouseY-player.y,mouseX-player.x);
-  player.x-=Math.cos(a)*2; player.y-=Math.sin(a)*2; // 後座力
-  gunFlame.push({x:player.x+Math.cos(a)*12,y:player.y+Math.sin(a)*12,life:4}); // 枪口火焰
-
-  // RPG 子彈爆炸
-  if(weaponSel.value==="rpg"){bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*weapon.bulletSpeed,vy:Math.sin(a)*weapon.bulletSpeed,life:120,radius:50,explosive:true});}
-  else bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*weapon.bulletSpeed,vy:Math.sin(a)*weapon.bulletSpeed,life:80,flame:weaponSel.value==="flamethrower"});
+  bullets.push({
+    x:player.x,y:player.y,
+    vx:Math.cos(a)*weapon.bulletSpeed,
+    vy:Math.sin(a)*weapon.bulletSpeed,
+    life:80
+  });
 }
 
 /* ===== 換彈 ===== */
-function startReload(){if(weapon.ammo===weapon.magSize)return;weapon.reloading=true;weapon.reloadTime=weapon.reloadMax;}
-function updateReload(){if(!weapon.reloading)return;weapon.reloadTime--;if(weapon.reloadTime<=0){weapon.reloading=false;weapon.ammo=weapon.magSize;}}
+function startReload(){
+  if(weapon.ammo===weapon.magSize) return;
+  weapon.reloading=true;
+  weapon.reloadTime=weapon.reloadMax;
+}
+
+function updateReload(){
+  if(!weapon.reloading) return;
+  weapon.reloadTime--;
+  if(weapon.reloadTime<=0){
+    weapon.reloading=false;
+    weapon.ammo=weapon.magSize;
+  }
+}
+
+/* ===== 敵人 ===== */
+const enemies=[];
+function spawnEnemy(){
+  enemies.push({
+    x:Math.random()*canvas.width,
+    y:Math.random()*canvas.height,
+    hp:20*difficulty.enemyHp,
+    maxHp:20*difficulty.enemyHp,
+    speed:1.2*difficulty.enemySpeed
+  });
+}
+
+/* ===== 開始 ===== */
+function startGame(){
+  menu.style.display="none";
+  gameStarted=true;
+  player.x=canvas.width/2;
+  player.y=canvas.height/2;
+
+  const w=weaponPresets[weaponSel.value];
+  Object.assign(weapon,{
+    dmg:w.dmg,
+    cooldown:w.cooldown,
+    auto:w.auto,
+    bulletSpeed:w.speed,
+    magSize:w.mag,
+    ammo:w.mag,
+    reloadMax:w.reload
+  });
+
+  difficulty =
+    difficultySel.value==="easy"?{enemyHp:0.7,enemySpeed:0.8,spawnRate:1400}:
+    difficultySel.value==="hard"?{enemyHp:1.5,enemySpeed:1.3,spawnRate:700}:
+    {enemyHp:1,enemySpeed:1,spawnRate:1000};
+
+  setInterval(spawnEnemy,difficulty.spawnRate);
+}
 
 /* ===== 畫槍 ===== */
-function drawGun(){const a=Math.atan2(mouseY-player.y,mouseX-player.x);ctx.save();ctx.translate(player.x,player.y);ctx.rotate(a);ctx.fillStyle="#aaa";ctx.fillRect(10,-3,18,6);ctx.restore();}
+function drawGun(){
+  const a=Math.atan2(mouseY-player.y,mouseX-player.x);
+  ctx.save();
+  ctx.translate(player.x,player.y);
+  ctx.rotate(a);
+  ctx.fillStyle="#aaa";
+  ctx.fillRect(10,-3,18,6);
+  ctx.restore();
+}
 
 /* ===== 主迴圈 ===== */
 function loop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(!gameStarted){requestAnimationFrame(loop);return;}
-  if(gameOver){ctx.fillStyle="rgba(0,0,0,0.6)";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="red";ctx.font="48px sans-serif";ctx.textAlign="center";ctx.fillText("YOU DIED",canvas.width/2,canvas.height/2);ctx.fillText("按 R 重生 / 按 E 返回主選單",canvas.width/2,canvas.height/2+60);requestAnimationFrame(loop);return;}
+  if(!gameStarted)return requestAnimationFrame(loop);
 
-  // 玩家移動
-  let mx=0,my=0;if(keys.w)my--;if(keys.s)my++;if(keys.a)mx--;if(keys.d)mx++;player.x+=mx*player.speed;player.y+=my*player.speed;
-  player.x=Math.max(20,Math.min(canvas.width-20,player.x));player.y=Math.max(20,Math.min(canvas.height-20,player.y));
+  let mx=0,my=0;
+  if(keys.w)my--;if(keys.s)my++;
+  if(keys.a)mx--;if(keys.d)mx++;
+  player.x+=mx*player.speed;
+  player.y+=my*player.speed;
 
-  // 玩家牆壁碰撞
-  walls.forEach(w=>{if(player.x+player.r>w.x&&player.x-player.r<w.x+w.w&&player.y+player.r>w.y&&player.y-player.r<w.y+w.h){if(mx>0)player.x=w.x-player.r;if(mx<0)player.x=w.x+w.w+player.r;if(my>0)player.y=w.y-player.r;if(my<0)player.y=w.y+w.h+player.r;}});
-
-  // 射擊
   if(weapon.auto && mouseDown) shoot();
+
   updateReload();
 
-  // 子彈
   bullets.forEach((b,i)=>{
     b.x+=b.vx;b.y+=b.vy;b.life--;
-    ctx.fillStyle=b.explosive?"orange":"yellow";ctx.fillRect(b.x-2,b.y-2,4,4);
-    if(b.explosive){enemies.forEach(e=>{const dist=Math.hypot(b.x-e.x,b.y-e.y);if(dist<b.radius)e.hp-=weapon.dmg*(1-dist/b.radius);});}
-    if(b.flame){fireParticles.push({x:b.x,y:b.y,life:20+Math.random()*10,size:6+Math.random()*4,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-0.5)*0.5});}
-    if(b.life<=0) bullets.splice(i,1);
+    ctx.fillStyle="yellow";
+    ctx.fillRect(b.x-2,b.y-2,4,4);
+    if(b.life<=0)bullets.splice(i,1);
   });
 
-  // 噴火槍持續AOE
-  if(weaponSel.value==="flamethrower" && mouseDown && weapon.ammo>0){
-    enemies.forEach(e=>{const dist=Math.hypot(player.x-e.x,player.y-e.y);if(dist<60)e.hp-=0.2;});
-    // 火焰粒子
-    const angle=Math.atan2(mouseY-player.y,mouseX-player.x);
-    fireParticles.push({x:player.x+Math.cos(angle)*12+Math.random()*6-3,y:player.y+Math.sin(angle)*12+Math.random()*6-3,life:20+Math.random()*10,size:6+Math.random()*4,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-0.5)*0.5});
-  }
-
-  // 敵人
   enemies.forEach((e,ei)=>{
-    const dx=player.x-e.x,dy=player.y-e.y,d=Math.hypot(dx,dy)||1;
-    e.x+=dx/d*e.speed;e.y+=dy/d*e.speed;
-    if(d<20 && !player.invincible){player.hp-=(e.boss?3:1);if(player.hp<=0)gameOver=true;}
-    bullets.forEach((b,bi)=>{if(Math.hypot(b.x-e.x,b.y-e.y)<16){e.hp-=weapon.dmg; bullets.splice(bi,1);}});
-    if(e.hp<=0) enemies.splice(ei,1);
-    ctx.fillStyle=e.boss?"purple":"red";ctx.beginPath();ctx.arc(e.x,e.y,16,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle="#400";ctx.fillRect(e.x-16,e.y-26,32,4);ctx.fillStyle="#f33";ctx.fillRect(e.x-16,e.y-26,32*(e.hp/e.maxHp),4);
+    const dx=player.x-e.x,dy=player.y-e.y;
+    const d=Math.hypot(dx,dy)||1;
+    e.x+=dx/d*e.speed;
+    e.y+=dy/d*e.speed;
+
+    bullets.forEach((b,bi)=>{
+      if(Math.hypot(b.x-e.x,b.y-e.y)<16){
+        e.hp-=weapon.dmg;
+        bullets.splice(bi,1);
+      }
+    });
+
+    if(e.hp<=0)enemies.splice(ei,1);
+
+    ctx.fillStyle="red";
+    ctx.beginPath();ctx.arc(e.x,e.y,16,0,Math.PI*2);ctx.fill();
+
+    ctx.fillStyle="#400";
+    ctx.fillRect(e.x-16,e.y-26,32,4);
+    ctx.fillStyle="#f33";
+    ctx.fillRect(e.x-16,e.y-26,32*(e.hp/e.maxHp),4);
   });
 
-  // 道具
-  items.forEach((it,ii)=>{ctx.fillStyle=it.type==="heal"?"green":"cyan";ctx.beginPath();ctx.arc(it.x,it.y,8,0,Math.PI*2);ctx.fill();
-    if(Math.hypot(it.x-player.x,it.y-player.y)<16){if(it.type==="heal")player.hp=Math.min(player.maxHp,player.hp+30);if(it.type==="speed"){player.speed=6;setTimeout(()=>player.speed=player.baseSpeed,5000);}items.splice(ii,1);}});
-
-  // 槍口火焰
-  gunFlame.forEach((f,i)=>{ctx.fillStyle="orange";ctx.fillRect(f.x-2,f.y-2,6,6);f.life--;if(f.life<=0)gunFlame.splice(i,1);});
-
-  // 噴火槍火焰粒子
-  fireParticles.forEach((p,i)=>{ctx.fillStyle=`rgba(255,${100+Math.random()*155},0,${p.life/30})`;ctx.beginPath();ctx.arc(p.x,p.y,p.size*(p.life/30),0,Math.PI*2);ctx.fill();p.x+=p.vx;p.y+=p.vy;p.life--;if(p.life<=0)fireParticles.splice(i,1);});
-
-  // 畫牆
-  ctx.fillStyle="#555";walls.forEach(w=>ctx.fillRect(w.x,w.y,w.w,w.h));
-
-  // 玩家
-  ctx.fillStyle="white";ctx.beginPath();ctx.arc(player.x,player.y,12,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="white";
+  ctx.beginPath();ctx.arc(player.x,player.y,12,0,Math.PI*2);ctx.fill();
   drawGun();
 
-  // UI
-  ctx.fillStyle="white";ctx.fillText(weapon.reloading?"換彈中...":`彈藥 ${weapon.ammo}/${weapon.magSize}`,20,20);
-  ctx.fillText(`血量 ${Math.floor(player.hp)}/${player.maxHp}`,20,40);
+  /* UI */
+  ctx.fillStyle="white";
+  ctx.fillText(
+    weapon.reloading ? "換彈中..." : `彈藥 ${weapon.ammo}/${weapon.magSize}`,
+    20,20
+  );
 
   requestAnimationFrame(loop);
 }
